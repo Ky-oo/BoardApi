@@ -1,8 +1,12 @@
 var createError = require("http-errors");
 var express = require("express");
 var path = require("path");
-
 var indexRouter = require("./routes/index");
+
+const dotenv = require("dotenv");
+dotenv.config({
+  path: process.env.NODE_ENV === "test" ? ".env.testing" : ".env",
+});
 
 var app = express();
 
