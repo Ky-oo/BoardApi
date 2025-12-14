@@ -5,7 +5,7 @@ var indexRouter = require("./routes/index");
 
 const dotenv = require("dotenv");
 dotenv.config({
-  path: process.env.NODE_ENV === "test" ? ".env.testing" : ".env",
+  path: process.env.NODE_ENV === "production" ? ".env" : ".env.local",
 });
 
 require("./model");
