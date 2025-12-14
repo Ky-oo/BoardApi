@@ -2,6 +2,11 @@ var createError = require("http-errors");
 var express = require("express");
 var path = require("path");
 var indexRouter = require("./routes/index");
+var userRouter = require("./routes/user");
+var organisationRouter = require("./routes/organisation");
+var activityRouter = require("./routes/activity");
+var chatRouter = require("./routes/chat");
+var chatMessageRouter = require("./routes/chatmessage");
 
 const dotenv = require("dotenv");
 dotenv.config({
@@ -17,6 +22,11 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.use("/", indexRouter);
+app.use("/users", userRouter);
+app.use("/organisations", organisationRouter);
+app.use("/activities", activityRouter);
+app.use("/chats", chatRouter);
+app.use("/chatmessages", chatMessageRouter);
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
