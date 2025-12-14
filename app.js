@@ -1,17 +1,18 @@
 var createError = require("http-errors");
 var express = require("express");
 var path = require("path");
+
+const dotenv = require("dotenv");
+dotenv.config({
+  path: ".env.local",
+});
+
 var indexRouter = require("./routes/index");
 var userRouter = require("./routes/user");
 var organisationRouter = require("./routes/organisation");
 var activityRouter = require("./routes/activity");
 var chatRouter = require("./routes/chat");
 var chatMessageRouter = require("./routes/chatmessage");
-
-const dotenv = require("dotenv");
-dotenv.config({
-  path: process.env.NODE_ENV === "production" ? ".env" : ".env.local",
-});
 
 require("./model");
 
