@@ -1,6 +1,8 @@
 var createError = require("http-errors");
 var express = require("express");
 var path = require("path");
+var cookieParser = require("cookie-parser");
+var { verifyAuth } = require("./middleware/auth");
 
 const dotenv = require("dotenv");
 dotenv.config({
@@ -19,17 +21,21 @@ require("./model");
 
 var app = express();
 
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.use("/", indexRouter);
+app.use("/auth", authRouter);
 app.use("/users", userRouter);
 app.use("/organisations", organisationRouter);
-app.use("/activities", activityRouter);
+app.use("/activity", activityRouter);
+
+app.use(verifyAuth);
+
 app.use("/chats", chatRouter);
 app.use("/chatmessages", chatMessageRouter);
-app.use("/auth", authRouter);
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {

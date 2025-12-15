@@ -1,9 +1,9 @@
 const express = require("express");
 const { ChatMessage } = require("../model");
-
+const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
-router.get("/", async (req, res) => {
+router.get("/", requireRole("admin"), async (req, res) => {
   try {
     const messages = await ChatMessage.findAll();
     res.json(messages);
@@ -15,7 +15,8 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const message = await ChatMessage.findByPk(req.params.id);
-    if (!message) return res.status(404).json({ error: "ChatMessage not found" });
+    if (!message)
+      return res.status(404).json({ error: "ChatMessage not found" });
     res.json(message);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -25,9 +26,7 @@ router.get("/:id", async (req, res) => {
 router.post("/", async (req, res) => {
   try {
     if (!req.body.chatId || !req.body.userId) {
-      return res
-        .status(400)
-        .json({ error: "chatId and userId are required" });
+      return res.status(400).json({ error: "chatId and userId are required" });
     }
     const message = await ChatMessage.create(req.body);
     res.status(201).json(message);
@@ -39,7 +38,8 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const message = await ChatMessage.findByPk(req.params.id);
-    if (!message) return res.status(404).json({ error: "ChatMessage not found" });
+    if (!message)
+      return res.status(404).json({ error: "ChatMessage not found" });
     await message.update(req.body);
     res.json(message);
   } catch (err) {
@@ -50,7 +50,8 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const message = await ChatMessage.findByPk(req.params.id);
-    if (!message) return res.status(404).json({ error: "ChatMessage not found" });
+    if (!message)
+      return res.status(404).json({ error: "ChatMessage not found" });
     await message.destroy();
     res.status(204).send();
   } catch (err) {

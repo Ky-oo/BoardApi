@@ -1,9 +1,10 @@
 const express = require("express");
 const { Organisation } = require("../model");
-
+const { requireRole, verifyAuth } = require("../middleware/auth");
+const { verify } = require("jsonwebtoken");
 const router = express.Router();
 
-router.get("/", async (req, res) => {
+router.get("/", requireRole("admin"), async (req, res) => {
   try {
     const organisations = await Organisation.findAll();
     res.json(organisations);
@@ -12,7 +13,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", verifyAuth, async (req, res) => {
   try {
     const organisation = await Organisation.findByPk(req.params.id);
     if (!organisation) {
@@ -24,7 +25,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", verifyAuth, async (req, res) => {
   try {
     const organisation = await Organisation.create(req.body);
     res.status(201).json(organisation);
@@ -33,7 +34,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", verifyAuth, async (req, res) => {
   try {
     const organisation = await Organisation.findByPk(req.params.id);
     if (!organisation) {
@@ -46,7 +47,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", verifyAuth, async (req, res) => {
   try {
     const organisation = await Organisation.findByPk(req.params.id);
     if (!organisation) {

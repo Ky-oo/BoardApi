@@ -1,6 +1,6 @@
 const express = require("express");
 const { Chat } = require("../model");
-
+const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
 router.get("/", async (req, res) => {
@@ -12,7 +12,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get("/:id", async (req, res) => {
+router.get("/:id", requireRole("admin"), async (req, res) => {
   try {
     const chat = await Chat.findByPk(req.params.id);
     if (!chat) return res.status(404).json({ error: "Chat not found" });
