@@ -13,6 +13,7 @@ var organisationRouter = require("./routes/organisation");
 var activityRouter = require("./routes/activity");
 var chatRouter = require("./routes/chat");
 var chatMessageRouter = require("./routes/chatmessage");
+var authRouter = require("./routes/auth");
 
 require("./model");
 
@@ -28,6 +29,7 @@ app.use("/organisations", organisationRouter);
 app.use("/activities", activityRouter);
 app.use("/chats", chatRouter);
 app.use("/chatmessages", chatMessageRouter);
+app.use("/auth", authRouter);
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
