@@ -1,12 +1,33 @@
 const express = require("express");
-const { Chat } = require("../model");
+const { Chat, ChatMessage } = require("../model");
 const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
+const getPaginationParams = (query) => {
+  const page = Math.max(parseInt(query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+};
+
 router.get("/", requireRole("admin"), async (req, res) => {
   try {
-    const chats = await Chat.findAll();
-    res.json(chats);
+    const { page, limit, offset } = getPaginationParams(req.query);
+    const { rows, count } = await Chat.findAndCountAll({
+      limit,
+      offset,
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        totalPages: Math.ceil(count / limit),
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -24,11 +45,26 @@ router.get("/:id", async (req, res) => {
 
 router.get("/:id/messages", async (req, res) => {
   try {
-    const chat = await Chat.findByPk(req.params.id, {
-      include: ["messages"],
-    });
+    const chat = await Chat.findByPk(req.params.id);
     if (!chat) return res.status(404).json({ error: "Chat not found" });
-    res.status(200).json(chat.messages);
+
+    const { page, limit, offset } = getPaginationParams(req.query);
+    const { rows, count } = await ChatMessage.findAndCountAll({
+      where: { chatId: req.params.id },
+      order: [["createdAt", "ASC"]],
+      limit,
+      offset,
+    });
+
+    res.status(200).json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total: count,
+        totalPages: Math.ceil(count / limit),
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

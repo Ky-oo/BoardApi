@@ -28,14 +28,14 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.use("/", indexRouter);
 app.use("/auth", authRouter);
-app.use("/users", userRouter);
-app.use("/organisations", organisationRouter);
+app.use("/user", userRouter);
+app.use("/organisation", organisationRouter);
 app.use("/activity", activityRouter);
 
 app.use(verifyAuth);
 
-app.use("/chats", chatRouter);
-app.use("/chatmessages", chatMessageRouter);
+app.use("/chat", chatRouter);
+app.use("/chatmessage", chatMessageRouter);
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
