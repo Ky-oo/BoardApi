@@ -1,5 +1,5 @@
 const express = require("express");
-const { Chat, ChatMessage } = require("../model");
+const { Chat, ChatMessage, User } = require("../model");
 const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
@@ -9,6 +9,14 @@ const getPaginationParams = (query) => {
   const offset = (page - 1) * limit;
   return { page, limit, offset };
 };
+
+const defaultInclude = [
+  {
+    model: User,
+    as: "User",
+    attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+  },
+];
 
 router.get("/", requireRole("admin"), async (req, res) => {
   try {
@@ -50,6 +58,7 @@ router.get("/:id/messages", async (req, res) => {
 
     const { page, limit, offset } = getPaginationParams(req.query);
     const { rows, count } = await ChatMessage.findAndCountAll({
+      include: defaultInclude,
       where: { chatId: req.params.id },
       order: [["createdAt", "ASC"]],
       limit,

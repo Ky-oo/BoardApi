@@ -1,5 +1,5 @@
 const express = require("express");
-const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
+const { Activity, User, Organisation } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 
 const router = express.Router();
