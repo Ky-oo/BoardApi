@@ -56,4 +56,16 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+router.get("/:id/messages", async (req, res) => {
+  try {
+    const chat = await Chat.findByPk(req.params.id, {
+      include: ["messages"],
+    });
+    if (!chat) return res.status(404).json({ error: "Chat not found" });
+    res.status(200).json(chat.messages);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -1,11 +1,5 @@
 const express = require("express");
-const {
-  Activity,
-  User,
-  Organisation,
-  Chat,
-  ChatMessage,
-} = require("../model");
+const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 
 const router = express.Router();
@@ -26,13 +20,7 @@ const defaultInclude = [
   { model: User, as: "hostUser" },
   { model: Organisation, as: "hostOrganisation" },
   { model: User, as: "users", through: { attributes: [] } },
-  {
-    model: Chat,
-    include: [
-      { model: User, as: "members", through: { attributes: [] } },
-      { model: ChatMessage },
-    ],
-  },
+  { model: Chat },
 ];
 
 router.get("/", async (req, res) => {
