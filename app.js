@@ -6,7 +6,7 @@ var { verifyAuth } = require("./middleware/auth");
 
 const dotenv = require("dotenv");
 dotenv.config({
-  path: ".env.local",
+  path: process.env.NODE_ENV === "production" ? ".env" : ".env.local",
 });
 
 var indexRouter = require("./routes/index");

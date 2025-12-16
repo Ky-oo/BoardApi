@@ -23,7 +23,7 @@ const signToken = (user) => {
 };
 
 router.post("/register", async (req, res) => {
-  const { firstname, lastname, pseudo, email, password, city, role } = req.body;
+  const { firstname, lastname, pseudo, email, password, city } = req.body;
   if (!firstname || !lastname || !pseudo || !email || !password || !city) {
     return res.status(400).json({
       error: "firstname, lastname, pseudo, email, password, city are required",
@@ -38,7 +38,7 @@ router.post("/register", async (req, res) => {
       email,
       password,
       city,
-      role: role || "user",
+      role: "user",
     });
     const token = signToken(user);
     res.status(201).json({ user: sanitizeUser(user), token });

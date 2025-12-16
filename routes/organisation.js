@@ -1,10 +1,9 @@
 const express = require("express");
 const { Organisation } = require("../model");
 const { requireRole, verifyAuth } = require("../middleware/auth");
-const { verify } = require("jsonwebtoken");
 const router = express.Router();
 
-router.get("/", requireRole("admin"), async (req, res) => {
+router.get("/", verifyAuth, requireRole("admin"), async (req, res) => {
   try {
     const organisations = await Organisation.findAll();
     res.json(organisations);
@@ -39,6 +38,9 @@ router.put("/:id", verifyAuth, async (req, res) => {
     const organisation = await Organisation.findByPk(req.params.id);
     if (!organisation) {
       return res.status(404).json({ error: "Organisation not found" });
+    }
+    if (req.user.id !== organisation.ownerUserId && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
     }
     await organisation.update(req.body);
     res.json(organisation);
