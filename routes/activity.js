@@ -1,5 +1,11 @@
 const express = require("express");
-const { Activity } = require("../model");
+const {
+  Activity,
+  User,
+  Organisation,
+  Chat,
+  ChatMessage,
+} = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 
 const router = express.Router();
@@ -16,9 +22,22 @@ const validateHost = (body) => {
   return null;
 };
 
+const defaultInclude = [
+  { model: User, as: "hostUser" },
+  { model: Organisation, as: "hostOrganisation" },
+  { model: User, as: "users", through: { attributes: [] } },
+  {
+    model: Chat,
+    include: [
+      { model: User, as: "members", through: { attributes: [] } },
+      { model: ChatMessage },
+    ],
+  },
+];
+
 router.get("/", async (req, res) => {
   try {
-    const activities = await Activity.findAll();
+    const activities = await Activity.findAll({ include: defaultInclude });
     res.json(activities);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -27,8 +46,9 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const activity = await Activity.findByPk(req.params.id);
-    console.log(activity);
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
     if (!activity) return res.status(404).json({ error: "Activity not found" });
     res.json(activity);
   } catch (err) {
