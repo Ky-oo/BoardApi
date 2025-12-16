@@ -3,7 +3,7 @@ const { Chat } = require("../model");
 const { requireRole } = require("../middleware/auth");
 const router = express.Router();
 
-router.get("/", async (req, res) => {
+router.get("/", requireRole("admin"), async (req, res) => {
   try {
     const chats = await Chat.findAll();
     res.json(chats);
@@ -12,11 +12,23 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.get("/:id", requireRole("admin"), async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const chat = await Chat.findByPk(req.params.id);
     if (!chat) return res.status(404).json({ error: "Chat not found" });
     res.json(chat);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/:id/messages", async (req, res) => {
+  try {
+    const chat = await Chat.findByPk(req.params.id, {
+      include: ["messages"],
+    });
+    if (!chat) return res.status(404).json({ error: "Chat not found" });
+    res.status(200).json(chat.messages);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -51,18 +63,6 @@ router.delete("/:id", async (req, res) => {
     if (!chat) return res.status(404).json({ error: "Chat not found" });
     await chat.destroy();
     res.status(204).send();
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/:id/messages", async (req, res) => {
-  try {
-    const chat = await Chat.findByPk(req.params.id, {
-      include: ["messages"],
-    });
-    if (!chat) return res.status(404).json({ error: "Chat not found" });
-    res.status(200).json(chat.messages);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
