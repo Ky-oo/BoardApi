@@ -16,6 +16,7 @@ var activityRouter = require("./routes/activity");
 var chatRouter = require("./routes/chat");
 var chatMessageRouter = require("./routes/chatmessage");
 var authRouter = require("./routes/auth");
+var corsMiddleware = require("./middleware/cors");
 
 require("./model");
 
@@ -25,6 +26,7 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
+app.use(corsMiddleware);
 
 app.use("/", indexRouter);
 app.use("/auth", authRouter);
