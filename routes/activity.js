@@ -11,14 +11,13 @@ const getPaginationParams = (query) => {
   return { page, limit, offset };
 };
 
-const validateHost = (body, user) => {
+const validateHost = async (body, user) => {
   if (user.role === "admin") {
     return null;
   }
   const hasUser = !!body.hostUserId;
-  const organisationId = body.hostOrganisationId;
-
   const hasOrganisation = !!body.hostOrganisationId;
+
   if (!hasUser && !hasOrganisation) {
     return "Activity requires hostUserId or hostOrganisationId";
   }
@@ -26,17 +25,20 @@ const validateHost = (body, user) => {
     return "Provide only one of hostUserId or hostOrganisationId";
   }
 
-  let organisation;
-  if (organisationId) {
-    organisation = Organisation.findByPk(organisationId);
-  }
-
-  if (
-    body.hostUserId !== user.id ||
-    (organisation && organisation.ownerUserId !== user.id)
-  ) {
+  if (hasUser && body.hostUserId !== user.id) {
     return "You can only create activities for yourself or your organisations";
   }
+
+  if (hasOrganisation) {
+    const organisation = await Organisation.findByPk(body.hostOrganisationId);
+    if (!organisation) {
+      return "Organisation not found";
+    }
+    if (organisation.ownerId !== user.id) {
+      return "You can only create activities for yourself or your organisations";
+    }
+  }
+
   return null;
 };
 
@@ -51,6 +53,7 @@ const defaultInclude = [
     model: User,
     as: "users",
     attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+    through: { attributes: [] },
   },
 ];
 
@@ -93,16 +96,19 @@ router.get("/:id", async (req, res) => {
 
 router.post("/", verifyAuth, async (req, res) => {
   try {
-    const validationError = validateHost(req.body, req.user);
+    const validationError = await validateHost(req.body, req.user);
 
     if (validationError)
       return res.status(400).json({ error: validationError });
     const activity = await Activity.create(req.body);
-    await activity.createChat({
-      chatUserId: req.user.id,
-      activityId: activity.id,
+    await activity.createChat();
+    await activity.addUser(req.user.id);
+
+    const created = await Activity.findByPk(activity.id, {
+      include: defaultInclude,
     });
-    res.status(201).json(activity);
+
+    res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -110,27 +116,97 @@ router.post("/", verifyAuth, async (req, res) => {
 
 router.put("/:id", verifyAuth, async (req, res) => {
   try {
-    if (req.body.hostUserId !== req.user.id && req.user.role !== "admin") {
+    const activity = await Activity.findByPk(req.params.id);
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    let isHostOrganisation = false;
+    if (activity.hostOrganisationId) {
+      const organisation = await Organisation.findByPk(
+        activity.hostOrganisationId
+      );
+      isHostOrganisation = organisation && organisation.ownerId === req.user.id;
+    }
+
+    const isHostUser = activity.hostUserId === req.user.id;
+    if (!isHostUser && !isHostOrganisation && req.user.role !== "admin") {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    if (
-      req.body.hostUserId === undefined &&
-      req.body.hostOrganisationId === undefined
-    ) {
-      return res
-        .status(400)
-        .json({ error: "Activity requires hostUserId or hostOrganisationId" });
-    }
-
-    const validationError = validateHost(req.body, req.user);
+    const validationError = await validateHost(
+      {
+        hostUserId:
+          req.body.hostUserId !== undefined
+            ? req.body.hostUserId
+            : activity.hostUserId,
+        hostOrganisationId:
+          req.body.hostOrganisationId !== undefined
+            ? req.body.hostOrganisationId
+            : activity.hostOrganisationId,
+      },
+      req.user
+    );
     if (validationError)
       return res.status(400).json({ error: validationError });
 
-    const activity = await Activity.findByPk(req.params.id);
-    if (!activity) return res.status(404).json({ error: "Activity not found" });
     await activity.update(req.body);
-    res.json(activity);
+    const updated = await Activity.findByPk(activity.id, {
+      include: defaultInclude,
+    });
+
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/:id/join", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(id, {
+      include: defaultInclude,
+    });
+
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    const alreadyJoined = activity.users.some(
+      (user) => user.id === req.user.id
+    );
+    if (alreadyJoined) {
+      return res.json(activity);
+    }
+
+    if (
+      Number.isInteger(activity.seats) &&
+      activity.seats > 0 &&
+      activity.users.length >= activity.seats
+    ) {
+      return res.status(400).json({ error: "Activity is full" });
+    }
+
+    await activity.addUser(req.user.id);
+    const updated = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    return res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/:id/leave", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    const isMember = activity.users.some((user) => user.id === req.user.id);
+    if (isMember) {
+      await activity.removeUser(req.user.id);
+    }
+    const updated = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    return res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -139,10 +215,21 @@ router.put("/:id", verifyAuth, async (req, res) => {
 router.delete("/:id", verifyAuth, async (req, res) => {
   try {
     const activity = await Activity.findByPk(req.params.id);
-    if (req.user.id !== activity.hostUserId && req.user.role !== "admin") {
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    let isHostOrganisation = false;
+    if (activity.hostOrganisationId) {
+      const organisation = await Organisation.findByPk(
+        activity.hostOrganisationId
+      );
+      isHostOrganisation = organisation && organisation.ownerId === req.user.id;
+    }
+
+    const isHostUser = activity.hostUserId === req.user.id;
+    if (!isHostUser && !isHostOrganisation && req.user.role !== "admin") {
       return res.status(403).json({ error: "Forbidden" });
     }
-    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
     await activity.destroy();
     res.status(204).send();
   } catch (err) {
