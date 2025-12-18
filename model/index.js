@@ -91,13 +91,13 @@ User.hasMany(ChatMessage, {
   onDelete: "CASCADE",
 });
 
-// sequelize.sync(
-//   process.env.NODE_ENV === "production"
-//     ? {}
-//     : {
-//         alter: true,
-//       }
-// );
+sequelize
+  .sync(process.env.SYNC_SCHEMA === "production" ? { alter: true } : {})
+  .then(() => console.log("Sequelize sync (alter) OK"))
+  .catch((err) => {
+    console.error("Sequelize sync error", err);
+    process.exit(1);
+  });
 
 module.exports = {
   sequelize,
