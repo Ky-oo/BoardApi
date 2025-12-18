@@ -33,6 +33,14 @@ const Activity = sequelize.define(
       type: DataTypes.STRING(20),
       allowNull: false,
     },
+    latitude: {
+      type: DataTypes.DECIMAL(10, 6),
+      allowNull: true,
+    },
+    longitude: {
+      type: DataTypes.DECIMAL(10, 6),
+      allowNull: true,
+    },
     place_name: {
       type: DataTypes.STRING(255),
       allowNull: true,
@@ -71,6 +79,34 @@ const Activity = sequelize.define(
     chatId: {
       type: DataTypes.INTEGER,
       allowNull: true,
+    },
+    playersId: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        const users = this.get("users");
+        if (!users) return [];
+        return users.map((user) => user.id);
+      },
+    },
+    hostType: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        const org = this.get("hostOrganisation");
+        const hostUser = this.get("hostUser");
+        if (org) return "organisation";
+        if (hostUser) return "user";
+        return null;
+      },
+    },
+    hostId: {
+      type: DataTypes.VIRTUAL,
+      get() {
+        const org = this.get("hostOrganisation");
+        const hostUser = this.get("hostUser");
+        if (org) return org.id;
+        if (hostUser) return hostUser.id;
+        return null;
+      },
     },
   },
   {

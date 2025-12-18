@@ -11,6 +11,10 @@ const Organisation = sequelize.define("Organisation", {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
+  ownerId: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+  },
 });
 
 module.exports = Organisation;
