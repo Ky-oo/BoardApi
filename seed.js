@@ -10,6 +10,7 @@ const {
   Activity,
   Chat,
   ChatMessage,
+  ChatMessageSeen,
 } = require("./model");
 
 const data = {
@@ -172,6 +173,7 @@ const data = {
       createdAt: "2025-02-21T19:00:00.000Z",
     },
   ],
+  messageSeens: [],
 };
 
 async function seed() {
@@ -232,6 +234,10 @@ async function seed() {
       })),
       { transaction }
     );
+
+    if (ChatMessageSeen && data.messageSeens.length) {
+      await ChatMessageSeen.bulkCreate(data.messageSeens, { transaction });
+    }
   });
 
   console.log("Database seeded successfully");

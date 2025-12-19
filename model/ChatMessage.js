@@ -7,6 +7,11 @@ const ChatMessage = sequelize.define("ChatMessage", {
     type: DataTypes.TEXT,
     allowNull: false,
   },
+  isDeleted: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 module.exports = ChatMessage;

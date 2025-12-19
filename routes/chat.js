@@ -1,83 +1,66 @@
 const express = require("express");
-const { Chat, ChatMessage, User } = require("../model");
-const { requireRole } = require("../middleware/auth");
+const { Op } = require("sequelize");
+const { Chat, ChatMessage } = require("../model");
+const { verifyAuth, requireRole } = require("../middleware/auth");
+const {
+  getActivityWithAccess,
+  messageInclude,
+  serializeMessage,
+} = require("../utils/chatHelpers");
+
 const router = express.Router();
-
-const getPaginationParams = (query) => {
-  const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), 100);
-  const offset = (page - 1) * limit;
-  return { page, limit, offset };
-};
-
-const defaultInclude = [
-  {
-    model: User,
-    as: "User",
-    attributes: ["id", "firstname", "lastname", "pseudo", "email"],
-  },
-];
 
 router.get("/", requireRole("admin"), async (req, res) => {
   try {
-    const { page, limit, offset } = getPaginationParams(req.query);
-    const { rows, count } = await Chat.findAndCountAll({
+    const chats = await Chat.findAll({ order: [["createdAt", "DESC"]] });
+    res.json({ data: chats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/:activityId", verifyAuth, async (req, res) => {
+  try {
+    const { activity, chat, error } = await getActivityWithAccess(
+      req.params.activityId,
+      req.user
+    );
+    if (error) return res.status(error.status).json({ error: error.message });
+    res.json({ chatId: chat.id, activityId: activity.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/:activityId/messages", verifyAuth, async (req, res) => {
+  try {
+    const { activityId } = req.params;
+    const { before } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+
+    const { chat, error } = await getActivityWithAccess(activityId, req.user);
+    if (error) return res.status(error.status).json({ error: error.message });
+
+    const where = { chatId: chat.id };
+    if (before) {
+      const beforeId = parseInt(before, 10);
+      if (!Number.isNaN(beforeId)) {
+        where.id = { [Op.lt]: beforeId };
+      }
+    }
+
+    const messages = await ChatMessage.findAll({
+      where: { ...where, isDeleted: false },
+      include: messageInclude,
+      order: [["createdAt", "ASC"]],
       limit,
-      offset,
-      order: [["createdAt", "DESC"]],
     });
 
     res.json({
-      data: rows,
+      data: messages.map(serializeMessage),
       pagination: {
-        page,
         limit,
-        total: count,
-        totalPages: Math.ceil(count / limit),
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/:id", async (req, res) => {
-  try {
-    const chat = await Chat.findByPk(req.params.id);
-    if (!chat) return res.status(404).json({ error: "Chat not found" });
-    if (req.user.id !== chat.chatUserId && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-    res.json(chat);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get("/:id/messages", async (req, res) => {
-  try {
-    const chat = await Chat.findByPk(req.params.id);
-    if (!chat) return res.status(404).json({ error: "Chat not found" });
-    if (req.user.id !== chat.chatUserId && req.user.role !== "admin") {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    const { page, limit, offset } = getPaginationParams(req.query);
-    const { rows, count } = await ChatMessage.findAndCountAll({
-      include: defaultInclude,
-      where: { chatId: req.params.id },
-      order: [["createdAt", "ASC"]],
-      limit,
-      offset,
-    });
-
-    res.status(200).json({
-      data: rows,
-      pagination: {
-        page,
-        limit,
-        total: count,
-        totalPages: Math.ceil(count / limit),
+        before: before || null,
       },
     });
   } catch (err) {

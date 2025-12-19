@@ -11,6 +11,15 @@ const getPaginationParams = (query) => {
   return { page, limit, offset };
 };
 
+const ensureActivityChat = async (activity) => {
+  let chat = await activity.getChat();
+  if (!chat) {
+    chat = await Chat.create();
+    await activity.setChat(chat);
+  }
+  return chat;
+};
+
 const validateHost = async (body, user) => {
   if (user.role === "admin") {
     return null;
@@ -101,8 +110,9 @@ router.post("/", verifyAuth, async (req, res) => {
     if (validationError)
       return res.status(400).json({ error: validationError });
     const activity = await Activity.create(req.body);
-    await activity.createChat();
+    const chat = await ensureActivityChat(activity);
     await activity.addUser(req.user.id);
+    await chat.addMember(req.user.id);
 
     const created = await Activity.findByPk(activity.id, {
       include: defaultInclude,
@@ -183,6 +193,8 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
     }
 
     await activity.addUser(req.user.id);
+    const chat = await ensureActivityChat(activity);
+    await chat.addMember(req.user.id);
     const updated = await Activity.findByPk(req.params.id, {
       include: defaultInclude,
     });
@@ -202,6 +214,10 @@ router.delete("/:id/leave", verifyAuth, async (req, res) => {
     const isMember = activity.users.some((user) => user.id === req.user.id);
     if (isMember) {
       await activity.removeUser(req.user.id);
+      const chat = await activity.getChat();
+      if (chat) {
+        await chat.removeMember(req.user.id);
+      }
     }
     const updated = await Activity.findByPk(req.params.id, {
       include: defaultInclude,

@@ -4,6 +4,7 @@ const Organisation = require("./Organisation");
 const Activity = require("./Activity");
 const Chat = require("./Chat");
 const ChatMessage = require("./ChatMessage");
+const ChatMessageSeen = require("./ChatMessageSeen");
 
 Organisation.belongsTo(User, {
   foreignKey: "ownerId",
@@ -91,9 +92,34 @@ User.hasMany(ChatMessage, {
   onDelete: "CASCADE",
 });
 
+ChatMessage.hasMany(ChatMessageSeen, {
+  foreignKey: "messageId",
+  as: "seenByUsers",
+  onDelete: "CASCADE",
+});
+ChatMessageSeen.belongsTo(ChatMessage, {
+  foreignKey: "messageId",
+  onDelete: "CASCADE",
+});
+ChatMessageSeen.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+  onDelete: "CASCADE",
+});
+User.hasMany(ChatMessageSeen, {
+  foreignKey: "userId",
+  as: "seenMessages",
+  onDelete: "CASCADE",
+});
+
+const syncNeedsAlter =
+  process.env.SYNC_SCHEMA === "production" ||
+  process.env.SYNC_SCHEMA === "alter" ||
+  process.env.SYNC_SCHEMA === "true";
+
 sequelize
-  .sync(process.env.SYNC_SCHEMA === "production" ? { alter: true } : {})
-  .then(() => console.log("Sequelize sync (alter) OK"))
+  .sync(syncNeedsAlter ? { alter: true } : {})
+  .then(() => console.log(`Sequelize sync ${syncNeedsAlter ? "(alter)" : ""} OK`))
   .catch((err) => {
     console.error("Sequelize sync error", err);
     process.exit(1);
@@ -106,4 +132,5 @@ module.exports = {
   Activity,
   Chat,
   ChatMessage,
+  ChatMessageSeen,
 };

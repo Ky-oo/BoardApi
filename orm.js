@@ -1,7 +1,7 @@
 const { Sequelize } = require("sequelize");
 
 let sequelizeInstance;
-if (process.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV !== "production") {
   sequelizeInstance = new Sequelize(process.env.DB_URI);
 } else {
   sequelizeInstance = new Sequelize({
