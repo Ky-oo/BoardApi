@@ -161,7 +161,7 @@ router.put("/:id", verifyAuth, async (req, res) => {
 
 router.post("/:id/join", verifyAuth, async (req, res) => {
   try {
-    const activity = await Activity.findByPk(id, {
+    const activity = await Activity.findByPk(req.params.id, {
       include: defaultInclude,
     });
 
