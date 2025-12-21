@@ -6,7 +6,7 @@ const router = express.Router();
 
 const getPaginationParams = (query) => {
   const page = Math.max(parseInt(query.page, 10) || 1, 1);
-  const limit = 12;
+  const limit = 13;
   const offset = (page - 1) * limit;
   return { page, limit, offset };
 };
