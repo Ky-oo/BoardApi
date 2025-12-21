@@ -12,6 +12,17 @@ router.get("/", verifyAuth, requireRole("admin"), async (req, res) => {
   }
 });
 
+router.get("/mine", verifyAuth, async (req, res) => {
+  try {
+    const organisations = await Organisation.findAll({
+      where: { ownerId: req.user.id },
+    });
+    res.json(organisations);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", verifyAuth, async (req, res) => {
   try {
     const organisation = await Organisation.findByPk(req.params.id);

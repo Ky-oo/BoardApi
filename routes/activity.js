@@ -11,6 +11,22 @@ const getPaginationParams = (query) => {
   return { page, limit, offset };
 };
 
+const getHostFilters = (query) => {
+  const where = {};
+  const hostOrganisationId = parseInt(query.hostOrganisationId, 10);
+  const hostUserId = parseInt(query.hostUserId, 10);
+
+  if (Number.isInteger(hostOrganisationId)) {
+    where.hostOrganisationId = hostOrganisationId;
+  }
+
+  if (Number.isInteger(hostUserId)) {
+    where.hostUserId = hostUserId;
+  }
+
+  return where;
+};
+
 const ensureActivityChat = async (activity) => {
   let chat = await activity.getChat();
   if (!chat) {
@@ -69,9 +85,11 @@ const defaultInclude = [
 router.get("/", async (req, res) => {
   try {
     const { page, limit, offset } = getPaginationParams(req.query);
+    const where = getHostFilters(req.query);
 
     const { rows, count } = await Activity.findAndCountAll({
       include: defaultInclude,
+      where,
       limit,
       offset,
       order: [["createdAt", "DESC"]],
@@ -111,8 +129,11 @@ router.post("/", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: validationError });
     const activity = await Activity.create(req.body);
     const chat = await ensureActivityChat(activity);
-    await activity.addUser(req.user.id);
-    await chat.addMember(req.user.id);
+    const isOrganisationHost = !!req.body.hostOrganisationId;
+    if (!isOrganisationHost) {
+      await activity.addUser(req.user.id);
+      await chat.addMember(req.user.id);
+    }
 
     const created = await Activity.findByPk(activity.id, {
       include: defaultInclude,
@@ -176,6 +197,11 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
     });
 
     if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    const priceNumber = Number(activity.price || 0);
+    if (priceNumber > 0) {
+      return res.status(400).json({ error: "Payment required" });
+    }
 
     const alreadyJoined = activity.users.some(
       (user) => user.id === req.user.id
