@@ -13,6 +13,7 @@ var indexRouter = require("./routes/index");
 var userRouter = require("./routes/user");
 var organisationRouter = require("./routes/organisation");
 var activityRouter = require("./routes/activity");
+var paymentRouter = require("./routes/payment");
 var chatRouter = require("./routes/chat");
 var chatMessageRouter = require("./routes/chatmessage");
 var authRouter = require("./routes/auth");
@@ -33,6 +34,7 @@ app.use("/auth", authRouter);
 app.use("/user", userRouter);
 app.use("/organisation", organisationRouter);
 app.use("/activity", activityRouter);
+app.use("/payment", paymentRouter);
 
 app.use(verifyAuth);
 
