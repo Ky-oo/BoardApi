@@ -33,6 +33,10 @@ const broadcast = (activityId, payload, excludeWs) => {
   });
 };
 
+const emitToRoom = (activityId, payload) => {
+  broadcast(activityId, payload);
+};
+
 const authenticate = async (token) => {
   if (!token) return { error: "Authentication required" };
   try {
@@ -279,4 +283,5 @@ const setupChatWebSocketServer = (server) => {
 
 module.exports = {
   setupChatWebSocketServer,
+  emitToRoom,
 };

@@ -41,20 +41,32 @@ const messageInclude = [
   },
 ];
 
+const SYSTEM_MESSAGE_PREFIX = "__system__:";
+
 const formatUserName = (user) => {
   if (!user) return "";
   if (user.pseudo) return user.pseudo;
   return [user.firstname, user.lastname].filter(Boolean).join(" ").trim();
 };
 
-const serializeMessage = (message) => ({
-  id: message.id,
-  userId: message.userId,
-  userName: formatUserName(message.User),
-  content: message.content,
-  createdAt: message.createdAt,
-  seenBy: (message.seenByUsers || []).map((record) => record.userId),
-});
+const buildSystemContent = (content) => `${SYSTEM_MESSAGE_PREFIX}${content}`;
+
+const serializeMessage = (message) => {
+  const rawContent = message.content || "";
+  const isSystem = rawContent.startsWith(SYSTEM_MESSAGE_PREFIX);
+  const content = isSystem
+    ? rawContent.slice(SYSTEM_MESSAGE_PREFIX.length).trim()
+    : rawContent;
+  return {
+    id: message.id,
+    userId: message.userId,
+    userName: isSystem ? "" : formatUserName(message.User),
+    content,
+    createdAt: message.createdAt,
+    seenBy: (message.seenByUsers || []).map((record) => record.userId),
+    system: isSystem,
+  };
+};
 
 const ensureChatForActivity = async (activity) => {
   let chat = await activity.getChat();
@@ -92,6 +104,7 @@ module.exports = {
   messageInclude,
   formatUserName,
   serializeMessage,
+  buildSystemContent,
   ensureChatForActivity,
   getActivityWithAccess,
 };

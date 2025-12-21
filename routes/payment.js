@@ -1,6 +1,13 @@
 const express = require("express");
-const { Activity, User, Organisation, Chat } = require("../model");
+const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
+const {
+  messageInclude,
+  serializeMessage,
+  buildSystemContent,
+  formatUserName,
+} = require("../utils/chatHelpers");
+const { emitToRoom } = require("../ws/chatServer");
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeSecretKey ? require("stripe")(stripeSecretKey) : null;
@@ -161,6 +168,29 @@ router.post("/confirm", verifyAuth, async (req, res) => {
       await activity.addUser(req.user.id);
       const chat = await ensureActivityChat(activity);
       await chat.addMember(req.user.id);
+      try {
+        const fullUser = await User.findByPk(req.user.id);
+        const displayName = formatUserName(fullUser) || "Un participant";
+        const systemContent = buildSystemContent(
+          `${displayName} a rejoint l'événement`
+        );
+        const systemMessage = await ChatMessage.create({
+          chatId: chat.id,
+          userId: req.user.id,
+          content: systemContent,
+        });
+        const saved = await ChatMessage.findByPk(systemMessage.id, {
+          include: messageInclude,
+        });
+        if (saved) {
+          emitToRoom(activity.id, {
+            type: "message",
+            message: serializeMessage(saved),
+          });
+        }
+      } catch (err) {
+        console.error("System join message error:", err);
+      }
     }
 
     const updated = await Activity.findByPk(activityId, {
