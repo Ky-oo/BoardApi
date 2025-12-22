@@ -1,5 +1,12 @@
 const express = require("express");
-const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
+const {
+  Activity,
+  User,
+  Organisation,
+  Chat,
+  ChatMessage,
+  Payment,
+} = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 const {
   messageInclude,
@@ -88,6 +95,13 @@ router.post("/checkout", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Already joined" });
     }
 
+    const paidPayment = await Payment.findOne({
+      where: { userId: req.user.id, activityId: activity.id, status: "paid" },
+    });
+    if (paidPayment) {
+      return res.status(400).json({ error: "Payment already completed" });
+    }
+
     const seats = Number(activity.seats || 0);
     const participantCount = await activity.countUsers();
     if (seats > 0 && participantCount >= seats) {
@@ -119,6 +133,22 @@ router.post("/checkout", verifyAuth, async (req, res) => {
       success_url: `${baseUrl}/activity/${activity.id}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/activity/${activity.id}?payment=cancel`,
     });
+
+    try {
+      await Payment.create({
+        userId: req.user.id,
+        activityId: activity.id,
+        sessionId: session.id,
+        amount: priceNumber,
+        currency: "eur",
+        status: "pending",
+      });
+    } catch (err) {
+      console.error("Payment record error:", err);
+      return res
+        .status(500)
+        .json({ error: "Unable to create payment record" });
+    }
 
     res.json({ url: session.url, sessionId: session.id });
   } catch (err) {
@@ -155,6 +185,55 @@ router.post("/confirm", verifyAuth, async (req, res) => {
     const activity = await Activity.findByPk(activityId);
     if (!activity) {
       return res.status(404).json({ error: "Activity not found" });
+    }
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id || null;
+    const sessionCurrency =
+      typeof session.currency === "string" ? session.currency : "eur";
+    const amountTotal =
+      typeof session.amount_total === "number" ? session.amount_total : null;
+    const amountValue =
+      amountTotal !== null ? amountTotal / 100 : getActivityPrice(activity);
+    const normalizedAmount = Number.isFinite(amountValue)
+      ? amountValue
+      : getActivityPrice(activity);
+
+    let paymentRecord = await Payment.findOne({ where: { sessionId } });
+    if (
+      paymentRecord &&
+      (paymentRecord.userId !== userId || paymentRecord.activityId !== activityId)
+    ) {
+      return res.status(400).json({ error: "Invalid payment record" });
+    }
+    if (paymentRecord?.status === "refunded") {
+      return res.status(400).json({ error: "Payment already refunded" });
+    }
+
+    if (!paymentRecord) {
+      paymentRecord = await Payment.create({
+        userId,
+        activityId,
+        sessionId,
+        amount: normalizedAmount,
+        currency: sessionCurrency,
+        status: "paid",
+        paymentIntentId: paymentIntentId || null,
+        paidAt: new Date(),
+      });
+    } else {
+      const updates = {
+        status: "paid",
+        paidAt: paymentRecord.paidAt || new Date(),
+        amount: normalizedAmount,
+        currency: sessionCurrency,
+      };
+      if (paymentIntentId) {
+        updates.paymentIntentId = paymentIntentId;
+      }
+      await paymentRecord.update(updates);
     }
 
     const alreadyJoined = await activity.hasUser(req.user.id);

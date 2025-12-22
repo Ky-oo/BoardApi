@@ -5,6 +5,7 @@ const Activity = require("./Activity");
 const Chat = require("./Chat");
 const ChatMessage = require("./ChatMessage");
 const ChatMessageSeen = require("./ChatMessageSeen");
+const Payment = require("./Payment");
 
 Organisation.belongsTo(User, {
   foreignKey: "ownerId",
@@ -45,6 +46,27 @@ Activity.belongsToMany(User, {
   foreignKey: "activityId",
   otherKey: "userId",
   as: "users",
+  onDelete: "CASCADE",
+});
+
+Payment.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+  onDelete: "CASCADE",
+});
+Payment.belongsTo(Activity, {
+  foreignKey: "activityId",
+  as: "activity",
+  onDelete: "CASCADE",
+});
+User.hasMany(Payment, {
+  foreignKey: "userId",
+  as: "payments",
+  onDelete: "CASCADE",
+});
+Activity.hasMany(Payment, {
+  foreignKey: "activityId",
+  as: "payments",
   onDelete: "CASCADE",
 });
 
@@ -133,4 +155,5 @@ module.exports = {
   Chat,
   ChatMessage,
   ChatMessageSeen,
+  Payment,
 };

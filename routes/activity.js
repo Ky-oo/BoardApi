@@ -1,6 +1,13 @@
 const express = require("express");
 const { Op } = require("sequelize");
-const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
+const {
+  Activity,
+  User,
+  Organisation,
+  Chat,
+  ChatMessage,
+  Payment,
+} = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 const {
   messageInclude,
@@ -10,7 +17,25 @@ const {
 } = require("../utils/chatHelpers");
 const { emitToRoom } = require("../ws/chatServer");
 
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecretKey ? require("stripe")(stripeSecretKey) : null;
+
 const router = express.Router();
+
+const REFUND_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+const isRefundWindowOpen = (activity) => {
+  if (!activity?.date) return false;
+  const eventDate = new Date(activity.date);
+  if (Number.isNaN(eventDate.getTime())) return false;
+  return Date.now() <= eventDate.getTime() - REFUND_WINDOW_MS;
+};
+
+const ensureStripeConfigured = (res) => {
+  if (stripe) return true;
+  res.status(500).json({ error: "Stripe is not configured." });
+  return false;
+};
 
 const getPaginationParams = (query) => {
   const page = Math.max(parseInt(query.page, 10) || 1, 1);
@@ -300,8 +325,53 @@ router.delete("/:id/leave", verifyAuth, async (req, res) => {
     });
     if (!activity) return res.status(404).json({ error: "Activity not found" });
 
+    if (activity.hostUserId === req.user.id) {
+      return res.status(403).json({ error: "Host cannot leave activity" });
+    }
+    if (activity.hostOrganisation?.ownerId === req.user.id) {
+      return res.status(403).json({ error: "Host cannot leave activity" });
+    }
+
     const isMember = activity.users.some((user) => user.id === req.user.id);
     if (isMember) {
+      const priceNumber = Number(activity.price || 0);
+      const isPaidActivity = Number.isFinite(priceNumber) && priceNumber > 0;
+      const shouldRefund = isPaidActivity && isRefundWindowOpen(activity);
+
+      if (shouldRefund) {
+        if (!ensureStripeConfigured(res)) return;
+        const payment = await Payment.findOne({
+          where: {
+            userId: req.user.id,
+            activityId: activity.id,
+            status: "paid",
+          },
+          order: [["createdAt", "DESC"]],
+        });
+        if (!payment) {
+          return res.status(400).json({ error: "Payment not found for refund" });
+        }
+        if (!payment.paymentIntentId) {
+          return res
+            .status(400)
+            .json({ error: "Payment intent missing for refund" });
+        }
+        try {
+          const refund = await stripe.refunds.create({
+            payment_intent: payment.paymentIntentId,
+          });
+          await payment.update({
+            status: "refunded",
+            refundId: refund.id,
+            refundedAt: new Date(),
+          });
+        } catch (err) {
+          return res
+            .status(400)
+            .json({ error: err.message || "Refund failed" });
+        }
+      }
+
       await activity.removeUser(req.user.id);
       const chat = await activity.getChat();
       if (chat) {
