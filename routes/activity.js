@@ -1,4 +1,5 @@
 const express = require("express");
+const { Op } = require("sequelize");
 const { Activity, User, Organisation, Chat, ChatMessage } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 const {
@@ -18,10 +19,23 @@ const getPaginationParams = (query) => {
   return { page, limit, offset };
 };
 
+const buildDateRangeFilter = (dateInput) => {
+  if (typeof dateInput !== "string" || !dateInput) return null;
+  const parts = dateInput.split("-").map((part) => parseInt(part, 10));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) return null;
+  const [year, month, day] = parts;
+  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+  const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
+  return { [Op.gte]: start, [Op.lt]: end };
+};
+
 const getHostFilters = (query) => {
   const where = {};
   const hostOrganisationId = parseInt(query.hostOrganisationId, 10);
   const hostUserId = parseInt(query.hostUserId, 10);
+  const city = typeof query.city === "string" ? query.city.trim() : "";
+  const search = typeof query.search === "string" ? query.search.trim() : "";
+  const dateFilter = buildDateRangeFilter(query.date);
 
   if (Number.isInteger(hostOrganisationId)) {
     where.hostOrganisationId = hostOrganisationId;
@@ -29,6 +43,25 @@ const getHostFilters = (query) => {
 
   if (Number.isInteger(hostUserId)) {
     where.hostUserId = hostUserId;
+  }
+
+  if (city && city !== "0") {
+    where.city = { [Op.like]: `%${city}%` };
+  }
+
+  if (dateFilter) {
+    where.date = dateFilter;
+  }
+
+  if (search) {
+    const likePattern = `%${search}%`;
+    where[Op.or] = [
+      { title: { [Op.like]: likePattern } },
+      { description: { [Op.like]: likePattern } },
+      { place_name: { [Op.like]: likePattern } },
+      { address: { [Op.like]: likePattern } },
+      { city: { [Op.like]: likePattern } },
+    ];
   }
 
   return where;
