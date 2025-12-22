@@ -67,6 +67,14 @@ router.post("/register", async (req, res) => {
   }
 
   try {
+    const existingEmail = await User.findOne({ where: { email } });
+    if (existingEmail) {
+      return res.status(409).json({ error: "Email already in use" });
+    }
+    const existingPseudo = await User.findOne({ where: { pseudo } });
+    if (existingPseudo) {
+      return res.status(409).json({ error: "Pseudo already in use" });
+    }
     const user = await User.create({
       firstname,
       lastname,
@@ -156,6 +164,10 @@ router.post("/google/complete", async (req, res) => {
     if (existing) {
       const token = signToken(existing);
       return res.json({ user: sanitizeUser(existing), token });
+    }
+    const existingPseudo = await User.findOne({ where: { pseudo } });
+    if (existingPseudo) {
+      return res.status(409).json({ error: "Pseudo already in use" });
     }
 
     const names = buildNameParts(payload, {
