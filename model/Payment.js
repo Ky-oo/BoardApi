@@ -30,7 +30,13 @@ const Payment = sequelize.define("Payment", {
     defaultValue: "eur",
   },
   status: {
-    type: DataTypes.ENUM("pending", "paid", "refunded"),
+    type: DataTypes.ENUM(
+      "pending",
+      "authorized",
+      "paid",
+      "refunded",
+      "canceled"
+    ),
     allowNull: false,
     defaultValue: "pending",
   },

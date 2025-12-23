@@ -7,6 +7,7 @@ const {
   Chat,
   ChatMessage,
   Payment,
+  ParticipationRequest,
 } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 const {
@@ -47,7 +48,8 @@ const getPaginationParams = (query) => {
 const buildDateRangeFilter = (dateInput) => {
   if (typeof dateInput !== "string" || !dateInput) return null;
   const parts = dateInput.split("-").map((part) => parseInt(part, 10));
-  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) return null;
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part)))
+    return null;
   const [year, month, day] = parts;
   const start = new Date(year, month - 1, day, 0, 0, 0, 0);
   const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
@@ -99,6 +101,48 @@ const ensureActivityChat = async (activity) => {
     await activity.setChat(chat);
   }
   return chat;
+};
+
+const canManageActivity = async (activity, user) => {
+  if (!activity || !user) return false;
+  if (user.role === "admin") return true;
+  if (activity.hostUserId === user.id) return true;
+  if (activity.hostOrganisationId) {
+    const organisation =
+      activity.hostOrganisation ||
+      (await Organisation.findByPk(activity.hostOrganisationId));
+    return organisation?.ownerId === user.id;
+  }
+  return false;
+};
+
+const addParticipantToActivity = async (activity, userId) => {
+  await activity.addUser(userId);
+  const chat = await ensureActivityChat(activity);
+  await chat.addMember(userId);
+  try {
+    const fullUser = await User.findByPk(userId);
+    const displayName = formatUserName(fullUser) || "Un participant";
+    const systemContent = buildSystemContent(
+      `${displayName} a rejoint l'événement`
+    );
+    const systemMessage = await ChatMessage.create({
+      chatId: chat.id,
+      userId,
+      content: systemContent,
+    });
+    const saved = await ChatMessage.findByPk(systemMessage.id, {
+      include: messageInclude,
+    });
+    if (saved) {
+      emitToRoom(activity.id, {
+        type: "message",
+        message: serializeMessage(saved),
+      });
+    }
+  } catch (err) {
+    console.error("System join message error:", err);
+  }
 };
 
 const validateHost = async (body, user) => {
@@ -263,16 +307,20 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
 
     if (!activity) return res.status(404).json({ error: "Activity not found" });
 
-    const priceNumber = Number(activity.price || 0);
-    if (priceNumber > 0) {
-      return res.status(400).json({ error: "Payment required" });
-    }
-
     const alreadyJoined = activity.users.some(
       (user) => user.id === req.user.id
     );
     if (alreadyJoined) {
       return res.json(activity);
+    }
+
+    if (activity.private) {
+      return res.status(400).json({ error: "Participation request required" });
+    }
+
+    const priceNumber = Number(activity.price || 0);
+    if (priceNumber > 0) {
+      return res.status(400).json({ error: "Payment required" });
     }
 
     if (
@@ -283,36 +331,391 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Activity is full" });
     }
 
-    await activity.addUser(req.user.id);
-    const chat = await ensureActivityChat(activity);
-    await chat.addMember(req.user.id);
-    try {
-      const fullUser = await User.findByPk(req.user.id);
-      const displayName = formatUserName(fullUser) || "Un participant";
-      const systemContent = buildSystemContent(
-        `${displayName} a rejoint l'événement`
-      );
-      const systemMessage = await ChatMessage.create({
-        chatId: chat.id,
-        userId: req.user.id,
-        content: systemContent,
-      });
-      const saved = await ChatMessage.findByPk(systemMessage.id, {
-        include: messageInclude,
-      });
-      if (saved) {
-        emitToRoom(activity.id, {
-          type: "message",
-          message: serializeMessage(saved),
-        });
-      }
-    } catch (err) {
-      console.error("System join message error:", err);
-    }
+    await addParticipantToActivity(activity, req.user.id);
     const updated = await Activity.findByPk(req.params.id, {
       include: defaultInclude,
     });
     return res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/:id/request", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    if (!activity.private) {
+      return res.status(400).json({ error: "Activity is public" });
+    }
+
+    if (await canManageActivity(activity, req.user)) {
+      return res.status(403).json({ error: "Host cannot request" });
+    }
+
+    const priceNumber = Number(activity.price || 0);
+    if (priceNumber > 0) {
+      return res.status(400).json({ error: "Payment required" });
+    }
+
+    const alreadyJoined = activity.users.some(
+      (user) => user.id === req.user.id
+    );
+    if (alreadyJoined) {
+      return res.status(400).json({ error: "Already joined" });
+    }
+
+    if (
+      Number.isInteger(activity.seats) &&
+      activity.seats > 0 &&
+      activity.users.length >= activity.seats
+    ) {
+      return res.status(400).json({ error: "Activity is full" });
+    }
+
+    const existingRequest = await ParticipationRequest.findOne({
+      where: { activityId: activity.id, userId: req.user.id },
+    });
+
+    if (existingRequest) {
+      if (existingRequest.status === "pending") {
+        return res.json(existingRequest);
+      }
+      if (existingRequest.status === "approved") {
+        return res.status(400).json({ error: "Already approved" });
+      }
+      await existingRequest.update({ status: "pending", paymentId: null });
+      return res.json(existingRequest);
+    }
+
+    const createdRequest = await ParticipationRequest.create({
+      activityId: activity.id,
+      userId: req.user.id,
+      status: "pending",
+    });
+    return res.status(201).json(createdRequest);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get("/:id/request", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id);
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    let request = await ParticipationRequest.findOne({
+      where: { activityId: activity.id, userId: req.user.id },
+      include: [
+        {
+          model: Payment,
+          as: "payment",
+          attributes: ["id", "status", "amount", "currency"],
+        },
+      ],
+    });
+
+    if (!request && activity.private) {
+      const priceNumber = Number(activity.price || 0);
+      const isPaidActivity = Number.isFinite(priceNumber) && priceNumber > 0;
+      if (isPaidActivity) {
+        const payment = await Payment.findOne({
+          where: {
+            activityId: activity.id,
+            userId: req.user.id,
+            status: { [Op.in]: ["pending", "authorized", "paid"] },
+          },
+          order: [["createdAt", "DESC"]],
+        });
+
+        let paymentStatus = payment?.status || null;
+        if (payment && payment.status === "pending" && payment.sessionId) {
+          if (!ensureStripeConfigured(res)) return;
+          try {
+            const session = await stripe.checkout.sessions.retrieve(
+              payment.sessionId
+            );
+            if (session?.payment_status === "paid") {
+              const paymentIntentId =
+                typeof session.payment_intent === "string"
+                  ? session.payment_intent
+                  : session.payment_intent?.id || null;
+              await payment.update({
+                status: "authorized",
+                paymentIntentId: paymentIntentId || payment.paymentIntentId,
+              });
+              paymentStatus = "authorized";
+            }
+          } catch (err) {
+            console.error("Payment session check error:", err);
+          }
+        }
+
+        if (payment && (paymentStatus === "authorized" || paymentStatus === "paid")) {
+          const [createdRequest] = await ParticipationRequest.findOrCreate({
+            where: { activityId: activity.id, userId: req.user.id },
+            defaults: {
+              status: "pending",
+              paymentId: payment.id,
+            },
+          });
+          if (createdRequest.paymentId !== payment.id) {
+            await createdRequest.update({
+              status: "pending",
+              paymentId: payment.id,
+            });
+          }
+          request = await ParticipationRequest.findByPk(createdRequest.id, {
+            include: [
+              {
+                model: Payment,
+                as: "payment",
+                attributes: ["id", "status", "amount", "currency"],
+              },
+            ],
+          });
+        }
+      }
+    }
+
+    if (!request) {
+      return res.json({ status: "none" });
+    }
+
+    if (request.status === "approved") {
+      const isMember = await activity.hasUser(req.user.id);
+      if (!isMember) {
+        await request.update({ status: "rejected" });
+        request = await ParticipationRequest.findByPk(request.id, {
+          include: [
+            {
+              model: Payment,
+              as: "payment",
+              attributes: ["id", "status", "amount", "currency"],
+            },
+          ],
+        });
+      }
+    }
+
+    return res.json({
+      id: request.id,
+      status: request.status,
+      paymentStatus: request.payment?.status || null,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get("/:id/requests", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    if (!activity.private) {
+      return res.status(400).json({ error: "Activity is public" });
+    }
+
+    if (!(await canManageActivity(activity, req.user))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const requests = await ParticipationRequest.findAll({
+      where: { activityId: activity.id },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+        },
+        {
+          model: Payment,
+          as: "payment",
+          attributes: ["id", "status", "amount", "currency"],
+        },
+      ],
+      order: [["createdAt", "ASC"]],
+    });
+
+    return res.json(requests);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post(
+  "/:id/requests/:requestId/approve",
+  verifyAuth,
+  async (req, res) => {
+    try {
+      const activity = await Activity.findByPk(req.params.id, {
+        include: defaultInclude,
+      });
+      if (!activity)
+        return res.status(404).json({ error: "Activity not found" });
+
+      if (!(await canManageActivity(activity, req.user))) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const request = await ParticipationRequest.findOne({
+        where: { id: req.params.requestId, activityId: activity.id },
+        include: [
+          {
+            model: Payment,
+            as: "payment",
+          },
+        ],
+      });
+
+      if (!request) {
+        return res.status(404).json({ error: "Request not found" });
+      }
+
+      if (request.status !== "pending") {
+        return res.status(400).json({ error: "Request already processed" });
+      }
+
+      const alreadyJoined = activity.users.some(
+        (user) => user.id === request.userId
+      );
+      if (
+        !alreadyJoined &&
+        Number.isInteger(activity.seats) &&
+        activity.seats > 0 &&
+        activity.users.length >= activity.seats
+      ) {
+        return res.status(400).json({ error: "Activity is full" });
+      }
+
+      const priceNumber = Number(activity.price || 0);
+      const isPaidActivity = Number.isFinite(priceNumber) && priceNumber > 0;
+
+      if (isPaidActivity) {
+        if (!ensureStripeConfigured(res)) return;
+        const payment = request.payment;
+        if (!payment) {
+          return res
+            .status(400)
+            .json({ error: "Payment not found for request" });
+        }
+        if (!payment.paymentIntentId) {
+          return res.status(400).json({ error: "Payment intent missing" });
+        }
+        if (payment.status !== "authorized" && payment.status !== "paid") {
+          return res.status(400).json({ error: "Payment not authorized" });
+        }
+
+        if (payment.status !== "paid") {
+          try {
+            await stripe.paymentIntents.capture(payment.paymentIntentId);
+            await payment.update({ status: "paid", paidAt: new Date() });
+          } catch (err) {
+            return res
+              .status(400)
+              .json({ error: err.message || "Payment capture failed" });
+          }
+        }
+      }
+
+      if (!alreadyJoined) {
+        await addParticipantToActivity(activity, request.userId);
+      }
+
+      await request.update({ status: "approved" });
+      const refreshed = await ParticipationRequest.findByPk(request.id, {
+        include: [
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+          },
+          {
+            model: Payment,
+            as: "payment",
+            attributes: ["id", "status", "amount", "currency"],
+          },
+        ],
+      });
+
+      return res.json(refreshed);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
+
+router.post("/:id/requests/:requestId/reject", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    if (!(await canManageActivity(activity, req.user))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const request = await ParticipationRequest.findOne({
+      where: { id: req.params.requestId, activityId: activity.id },
+      include: [
+        {
+          model: Payment,
+          as: "payment",
+        },
+      ],
+    });
+
+    if (!request) {
+      return res.status(404).json({ error: "Request not found" });
+    }
+
+    if (request.status !== "pending") {
+      return res.status(400).json({ error: "Request already processed" });
+    }
+
+    const priceNumber = Number(activity.price || 0);
+    const isPaidActivity = Number.isFinite(priceNumber) && priceNumber > 0;
+
+    if (isPaidActivity && request.payment?.paymentIntentId) {
+      if (!ensureStripeConfigured(res)) return;
+      try {
+        if (request.payment.status === "authorized") {
+          await stripe.paymentIntents.cancel(request.payment.paymentIntentId);
+        }
+        await request.payment.update({
+          status: "canceled",
+        });
+      } catch (err) {
+        return res
+          .status(400)
+          .json({ error: err.message || "Payment cancellation failed" });
+      }
+    }
+
+    await request.update({ status: "rejected" });
+    const refreshed = await ParticipationRequest.findByPk(request.id, {
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+        },
+        {
+          model: Payment,
+          as: "payment",
+          attributes: ["id", "status", "amount", "currency"],
+        },
+      ],
+    });
+
+    return res.json(refreshed);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -349,7 +752,9 @@ router.delete("/:id/leave", verifyAuth, async (req, res) => {
           order: [["createdAt", "DESC"]],
         });
         if (!payment) {
-          return res.status(400).json({ error: "Payment not found for refund" });
+          return res
+            .status(400)
+            .json({ error: "Payment not found for refund" });
         }
         if (!payment.paymentIntentId) {
           return res
@@ -376,6 +781,14 @@ router.delete("/:id/leave", verifyAuth, async (req, res) => {
       const chat = await activity.getChat();
       if (chat) {
         await chat.removeMember(req.user.id);
+      }
+      if (activity.private) {
+        const request = await ParticipationRequest.findOne({
+          where: { activityId: activity.id, userId: req.user.id },
+        });
+        if (request && request.status !== "rejected") {
+          await request.update({ status: "rejected" });
+        }
       }
     }
     const updated = await Activity.findByPk(req.params.id, {

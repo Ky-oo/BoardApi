@@ -6,6 +6,7 @@ const Chat = require("./Chat");
 const ChatMessage = require("./ChatMessage");
 const ChatMessageSeen = require("./ChatMessageSeen");
 const Payment = require("./Payment");
+const ParticipationRequest = require("./ParticipationRequest");
 
 Organisation.belongsTo(User, {
   foreignKey: "ownerId",
@@ -68,6 +69,37 @@ Activity.hasMany(Payment, {
   foreignKey: "activityId",
   as: "payments",
   onDelete: "CASCADE",
+});
+
+ParticipationRequest.belongsTo(User, {
+  foreignKey: "userId",
+  as: "user",
+  onDelete: "CASCADE",
+});
+ParticipationRequest.belongsTo(Activity, {
+  foreignKey: "activityId",
+  as: "activity",
+  onDelete: "CASCADE",
+});
+User.hasMany(ParticipationRequest, {
+  foreignKey: "userId",
+  as: "participationRequests",
+  onDelete: "CASCADE",
+});
+Activity.hasMany(ParticipationRequest, {
+  foreignKey: "activityId",
+  as: "participationRequests",
+  onDelete: "CASCADE",
+});
+ParticipationRequest.belongsTo(Payment, {
+  foreignKey: "paymentId",
+  as: "payment",
+  onDelete: "SET NULL",
+});
+Payment.hasOne(ParticipationRequest, {
+  foreignKey: "paymentId",
+  as: "participationRequest",
+  onDelete: "SET NULL",
 });
 
 Activity.belongsTo(Chat, {
@@ -141,7 +173,9 @@ const syncNeedsAlter =
 
 sequelize
   .sync(syncNeedsAlter ? { alter: true } : {})
-  .then(() => console.log(`Sequelize sync ${syncNeedsAlter ? "(alter)" : ""} OK`))
+  .then(() =>
+    console.log(`Sequelize sync ${syncNeedsAlter ? "(alter)" : ""} OK`)
+  )
   .catch((err) => {
     console.error("Sequelize sync error", err);
     process.exit(1);
@@ -156,4 +190,5 @@ module.exports = {
   ChatMessage,
   ChatMessageSeen,
   Payment,
+  ParticipationRequest,
 };

@@ -1,4 +1,5 @@
 const express = require("express");
+const { Op } = require("sequelize");
 const {
   Activity,
   User,
@@ -6,6 +7,7 @@ const {
   Chat,
   ChatMessage,
   Payment,
+  ParticipationRequest,
 } = require("../model");
 const { verifyAuth } = require("../middleware/auth");
 const {
@@ -95,11 +97,27 @@ router.post("/checkout", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Already joined" });
     }
 
-    const paidPayment = await Payment.findOne({
-      where: { userId: req.user.id, activityId: activity.id, status: "paid" },
+    if (activity.private) {
+      const existingRequest = await ParticipationRequest.findOne({
+        where: { activityId: activity.id, userId: req.user.id },
+      });
+      if (existingRequest?.status === "pending") {
+        return res.status(400).json({ error: "Request already pending" });
+      }
+      if (existingRequest?.status === "approved") {
+        return res.status(400).json({ error: "Already approved" });
+      }
+    }
+
+    const existingPayment = await Payment.findOne({
+      where: {
+        userId: req.user.id,
+        activityId: activity.id,
+        status: { [Op.in]: ["pending", "authorized", "paid"] },
+      },
     });
-    if (paidPayment) {
-      return res.status(400).json({ error: "Payment already completed" });
+    if (existingPayment) {
+      return res.status(400).json({ error: "Payment already started" });
     }
 
     const seats = Number(activity.seats || 0);
@@ -109,7 +127,7 @@ router.post("/checkout", verifyAuth, async (req, res) => {
     }
 
     const baseUrl = getClientBaseUrl();
-    const session = await stripe.checkout.sessions.create({
+    const sessionPayload = {
       mode: "payment",
       payment_method_types: ["card"],
       line_items: [
@@ -132,7 +150,13 @@ router.post("/checkout", verifyAuth, async (req, res) => {
       },
       success_url: `${baseUrl}/activity/${activity.id}?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/activity/${activity.id}?payment=cancel`,
-    });
+    };
+
+    if (activity.private) {
+      sessionPayload.payment_intent_data = { capture_method: "manual" };
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionPayload);
 
     try {
       await Payment.create({
@@ -168,9 +192,6 @@ router.post("/confirm", verifyAuth, async (req, res) => {
     if (!session) {
       return res.status(404).json({ error: "Session not found" });
     }
-    if (session.payment_status !== "paid") {
-      return res.status(400).json({ error: "Payment not completed" });
-    }
 
     const metadata = session.metadata || {};
     const activityId = Number(metadata.activityId);
@@ -187,10 +208,32 @@ router.post("/confirm", verifyAuth, async (req, res) => {
       return res.status(404).json({ error: "Activity not found" });
     }
 
+    const isPrivate = !!activity.private;
+
     const paymentIntentId =
       typeof session.payment_intent === "string"
         ? session.payment_intent
         : session.payment_intent?.id || null;
+    if (isPrivate && !paymentIntentId) {
+      return res.status(400).json({ error: "Payment intent missing" });
+    }
+    if (session.payment_status !== "paid") {
+      if (!isPrivate) {
+        return res.status(400).json({ error: "Payment not completed" });
+      }
+      try {
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          paymentIntentId
+        );
+        if (paymentIntent?.status !== "requires_capture") {
+          return res.status(400).json({ error: "Payment not completed" });
+        }
+      } catch (err) {
+        return res
+          .status(400)
+          .json({ error: err.message || "Payment not completed" });
+      }
+    }
     const sessionCurrency =
       typeof session.currency === "string" ? session.currency : "eur";
     const amountTotal =
@@ -211,6 +254,9 @@ router.post("/confirm", verifyAuth, async (req, res) => {
     if (paymentRecord?.status === "refunded") {
       return res.status(400).json({ error: "Payment already refunded" });
     }
+    if (paymentRecord?.status === "canceled") {
+      return res.status(400).json({ error: "Payment was canceled" });
+    }
 
     if (!paymentRecord) {
       paymentRecord = await Payment.create({
@@ -219,21 +265,44 @@ router.post("/confirm", verifyAuth, async (req, res) => {
         sessionId,
         amount: normalizedAmount,
         currency: sessionCurrency,
-        status: "paid",
+        status: isPrivate ? "authorized" : "paid",
         paymentIntentId: paymentIntentId || null,
-        paidAt: new Date(),
+        paidAt: isPrivate ? null : new Date(),
       });
     } else {
       const updates = {
-        status: "paid",
-        paidAt: paymentRecord.paidAt || new Date(),
+        status: isPrivate ? "authorized" : "paid",
         amount: normalizedAmount,
         currency: sessionCurrency,
       };
       if (paymentIntentId) {
         updates.paymentIntentId = paymentIntentId;
       }
+      if (!isPrivate) {
+        updates.paidAt = paymentRecord.paidAt || new Date();
+      }
       await paymentRecord.update(updates);
+    }
+
+    if (isPrivate) {
+      const request = await ParticipationRequest.findOne({
+        where: { activityId, userId },
+      });
+      if (request?.status === "approved") {
+        return res.json({ status: "approved" });
+      }
+      if (request) {
+        await request.update({ status: "pending", paymentId: paymentRecord.id });
+      } else {
+        await ParticipationRequest.create({
+          activityId,
+          userId,
+          status: "pending",
+          paymentId: paymentRecord.id,
+        });
+      }
+
+      return res.json({ status: "request_pending" });
     }
 
     const alreadyJoined = await activity.hasUser(req.user.id);
@@ -251,7 +320,7 @@ router.post("/confirm", verifyAuth, async (req, res) => {
         const fullUser = await User.findByPk(req.user.id);
         const displayName = formatUserName(fullUser) || "Un participant";
         const systemContent = buildSystemContent(
-          `${displayName} a rejoint l'événement`
+          `${displayName} a rejoint l'?v?nement`
         );
         const systemMessage = await ChatMessage.create({
           chatId: chat.id,
