@@ -239,8 +239,6 @@ async function seed() {
       await ChatMessageSeen.bulkCreate(data.messageSeens, { transaction });
     }
   });
-
-  console.log("Database seeded successfully");
 }
 
 seed()

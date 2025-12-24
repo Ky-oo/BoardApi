@@ -277,8 +277,6 @@ const setupChatWebSocketServer = (server) => {
 
     ws.on("close", () => cleanupConnection(ws));
   });
-
-  console.log("WebSocket chat server ready on /ws/chat");
 };
 
 module.exports = {

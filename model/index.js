@@ -171,15 +171,10 @@ const syncNeedsAlter =
   process.env.SYNC_SCHEMA === "alter" ||
   process.env.SYNC_SCHEMA === "true";
 
-sequelize
-  .sync(syncNeedsAlter ? { alter: true } : {})
-  .then(() =>
-    console.log(`Sequelize sync ${syncNeedsAlter ? "(alter)" : ""} OK`)
-  )
-  .catch((err) => {
-    console.error("Sequelize sync error", err);
-    process.exit(1);
-  });
+sequelize.sync(syncNeedsAlter ? { alter: true } : {}).catch((err) => {
+  console.error("Sequelize sync error", err);
+  process.exit(1);
+});
 
 module.exports = {
   sequelize,
