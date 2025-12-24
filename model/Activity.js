@@ -113,7 +113,11 @@ const Activity = sequelize.define(
     validate: {
       // Ensure exactly one host is set
       hasExactlyOneHost() {
+        const hostType = this.getDataValue("hostType");
         if (!this.hostUserId && !this.hostOrganisationId) {
+          if (hostType === "event") {
+            return;
+          }
           throw new Error("Activity requires a host (user or organisation).");
         }
         if (this.hostUserId && this.hostOrganisationId) {

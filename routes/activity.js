@@ -180,7 +180,7 @@ const defaultInclude = [
   {
     model: User,
     as: "hostUser",
-    attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+    attributes: ["id", "firstname", "lastname", "pseudo", "email", "role"],
   },
   { model: Organisation, as: "hostOrganisation" },
   {
@@ -236,11 +236,19 @@ router.post("/", verifyAuth, async (req, res) => {
 
     if (validationError)
       return res.status(400).json({ error: validationError });
+    console.log(req.body);
+
     const activity = await Activity.create(req.body);
+
     const chat = await ensureActivityChat(activity);
     const isOrganisationHost = !!req.body.hostOrganisationId;
-    if (!isOrganisationHost) {
+    const isBoardyHost = req.body.hostType === "event";
+    const shouldAddCreatorAsParticipant =
+      !isOrganisationHost && !isBoardyHost && req.user.role !== "admin";
+    if (shouldAddCreatorAsParticipant) {
       await activity.addUser(req.user.id);
+    }
+    if (shouldAddCreatorAsParticipant || isOrganisationHost || isBoardyHost) {
       await chat.addMember(req.user.id);
     }
 
@@ -454,7 +462,10 @@ router.get("/:id/request", verifyAuth, async (req, res) => {
           }
         }
 
-        if (payment && (paymentStatus === "authorized" || paymentStatus === "paid")) {
+        if (
+          payment &&
+          (paymentStatus === "authorized" || paymentStatus === "paid")
+        ) {
           const [createdRequest] = await ParticipationRequest.findOrCreate({
             where: { activityId: activity.id, userId: req.user.id },
             defaults: {
