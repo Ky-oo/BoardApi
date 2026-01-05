@@ -4,6 +4,7 @@ const {
   Activity,
   User,
   Organisation,
+  GuestUser,
   Chat,
   ChatMessage,
   Payment,
@@ -53,17 +54,31 @@ const ensureActivityChat = async (activity) => {
   return chat;
 };
 
+const countParticipants = async (activity) => {
+  const [userCount, guestCount] = await Promise.all([
+    activity.countUsers(),
+    activity.countGuestUsers(),
+  ]);
+  return userCount + guestCount;
+};
+
 const defaultInclude = [
   {
     model: User,
     as: "hostUser",
-    attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+    attributes: ["id", "firstname", "lastname", "pseudo", "email", "role"],
   },
   { model: Organisation, as: "hostOrganisation" },
   {
     model: User,
     as: "users",
     attributes: ["id", "firstname", "lastname", "pseudo", "email"],
+    through: { attributes: [] },
+  },
+  {
+    model: GuestUser,
+    as: "guestUsers",
+    attributes: ["id", "name", "email"],
     through: { attributes: [] },
   },
 ];
@@ -121,7 +136,7 @@ router.post("/checkout", verifyAuth, async (req, res) => {
     }
 
     const seats = Number(activity.seats || 0);
-    const participantCount = await activity.countUsers();
+    const participantCount = await countParticipants(activity);
     if (seats > 0 && participantCount >= seats) {
       return res.status(400).json({ error: "Activity is full" });
     }
@@ -308,7 +323,7 @@ router.post("/confirm", verifyAuth, async (req, res) => {
     const alreadyJoined = await activity.hasUser(req.user.id);
     if (!alreadyJoined) {
       const seats = Number(activity.seats || 0);
-      const participantCount = await activity.countUsers();
+      const participantCount = await countParticipants(activity);
       if (seats > 0 && participantCount >= seats) {
         return res.status(400).json({ error: "Activity is full" });
       }

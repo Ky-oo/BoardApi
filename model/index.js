@@ -2,6 +2,8 @@ const sequelize = require("../orm");
 const User = require("./User");
 const Organisation = require("./Organisation");
 const Activity = require("./Activity");
+const GuestUser = require("./GuestUser");
+const GuestUserActivity = require("./GuestUserActivity");
 const Chat = require("./Chat");
 const ChatMessage = require("./ChatMessage");
 const ChatMessageSeen = require("./ChatMessageSeen");
@@ -47,6 +49,21 @@ Activity.belongsToMany(User, {
   foreignKey: "activityId",
   otherKey: "userId",
   as: "users",
+  onDelete: "CASCADE",
+});
+
+GuestUser.belongsToMany(Activity, {
+  through: GuestUserActivity,
+  foreignKey: "guestUserId",
+  otherKey: "activityId",
+  as: "activities",
+  onDelete: "CASCADE",
+});
+Activity.belongsToMany(GuestUser, {
+  through: GuestUserActivity,
+  foreignKey: "activityId",
+  otherKey: "guestUserId",
+  as: "guestUsers",
   onDelete: "CASCADE",
 });
 
@@ -181,6 +198,8 @@ module.exports = {
   User,
   Organisation,
   Activity,
+  GuestUser,
+  GuestUserActivity,
   Chat,
   ChatMessage,
   ChatMessageSeen,

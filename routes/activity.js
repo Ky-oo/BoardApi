@@ -4,6 +4,7 @@ const {
   Activity,
   User,
   Organisation,
+  GuestUser,
   Chat,
   ChatMessage,
   Payment,
@@ -103,6 +104,14 @@ const ensureActivityChat = async (activity) => {
   return chat;
 };
 
+const getParticipantCount = (activity) => {
+  const userCount = Array.isArray(activity.users) ? activity.users.length : 0;
+  const guestCount = Array.isArray(activity.guestUsers)
+    ? activity.guestUsers.length
+    : 0;
+  return userCount + guestCount;
+};
+
 const canManageActivity = async (activity, user) => {
   if (!activity || !user) return false;
   if (user.role === "admin") return true;
@@ -189,6 +198,12 @@ const defaultInclude = [
     attributes: ["id", "firstname", "lastname", "pseudo", "email"],
     through: { attributes: [] },
   },
+  {
+    model: GuestUser,
+    as: "guestUsers",
+    attributes: ["id", "name", "email"],
+    through: { attributes: [] },
+  },
 ];
 
 router.get("/", async (req, res) => {
@@ -236,7 +251,6 @@ router.post("/", verifyAuth, async (req, res) => {
 
     if (validationError)
       return res.status(400).json({ error: validationError });
-    console.log(req.body);
 
     const activity = await Activity.create(req.body);
 
@@ -331,10 +345,11 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Payment required" });
     }
 
+    const participantCount = getParticipantCount(activity);
     if (
       Number.isInteger(activity.seats) &&
       activity.seats > 0 &&
-      activity.users.length >= activity.seats
+      participantCount >= activity.seats
     ) {
       return res.status(400).json({ error: "Activity is full" });
     }
@@ -343,6 +358,85 @@ router.post("/:id/join", verifyAuth, async (req, res) => {
     const updated = await Activity.findByPk(req.params.id, {
       include: defaultInclude,
     });
+    return res.json(updated);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/:id/guest", verifyAuth, async (req, res) => {
+  try {
+    const activity = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+    if (!activity) return res.status(404).json({ error: "Activity not found" });
+
+    if (!(await canManageActivity(activity, req.user))) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
+    const email =
+      typeof req.body.email === "string" ? req.body.email.trim() : "";
+
+    if (!name) {
+      return res.status(400).json({ error: "Name is required" });
+    }
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: "Invalid email" });
+    }
+
+    const participantCount = getParticipantCount(activity);
+    if (
+      Number.isInteger(activity.seats) &&
+      activity.seats > 0 &&
+      participantCount >= activity.seats
+    ) {
+      return res.status(400).json({ error: "Activity is full" });
+    }
+
+    const [guestUser] = await GuestUser.findOrCreate({
+      where: { email },
+      defaults: { name, email },
+    });
+
+    if (guestUser.name !== name) {
+      await guestUser.update({ name });
+    }
+
+    const alreadyAdded = await activity.hasGuestUser(guestUser);
+    if (alreadyAdded) {
+      return res.status(400).json({ error: "Guest already added" });
+    }
+
+    await activity.addGuestUser(guestUser);
+
+    const chat = await ensureActivityChat(activity);
+    const systemContent = buildSystemContent(
+      `L'organisateur a ajoute ${guestUser.name} manuellement. Cette personne ne peut pas utiliser le chat.`
+    );
+    const systemMessage = await ChatMessage.create({
+      chatId: chat.id,
+      userId: req.user.id,
+      content: systemContent,
+    });
+    const saved = await ChatMessage.findByPk(systemMessage.id, {
+      include: messageInclude,
+    });
+    if (saved) {
+      emitToRoom(activity.id, {
+        type: "message",
+        message: serializeMessage(saved),
+      });
+    }
+
+    const updated = await Activity.findByPk(req.params.id, {
+      include: defaultInclude,
+    });
+
     return res.json(updated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -376,10 +470,11 @@ router.post("/:id/request", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Already joined" });
     }
 
+    const participantCount = getParticipantCount(activity);
     if (
       Number.isInteger(activity.seats) &&
       activity.seats > 0 &&
-      activity.users.length >= activity.seats
+      participantCount >= activity.seats
     ) {
       return res.status(400).json({ error: "Activity is full" });
     }
@@ -596,11 +691,12 @@ router.post(
       const alreadyJoined = activity.users.some(
         (user) => user.id === request.userId
       );
+      const participantCount = getParticipantCount(activity);
       if (
         !alreadyJoined &&
         Number.isInteger(activity.seats) &&
         activity.seats > 0 &&
-        activity.users.length >= activity.seats
+        participantCount >= activity.seats
       ) {
         return res.status(400).json({ error: "Activity is full" });
       }
