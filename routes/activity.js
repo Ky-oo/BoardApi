@@ -376,16 +376,14 @@ router.post("/:id/guest", verifyAuth, async (req, res) => {
     }
 
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-    const email =
+    const rawEmail =
       typeof req.body.email === "string" ? req.body.email.trim() : "";
+    const email = rawEmail || null;
 
     if (!name) {
       return res.status(400).json({ error: "Name is required" });
     }
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: "Invalid email" });
     }
 
@@ -398,13 +396,18 @@ router.post("/:id/guest", verifyAuth, async (req, res) => {
       return res.status(400).json({ error: "Activity is full" });
     }
 
-    const [guestUser] = await GuestUser.findOrCreate({
-      where: { email },
-      defaults: { name, email },
-    });
-
-    if (guestUser.name !== name) {
-      await guestUser.update({ name });
+    let guestUser;
+    if (email) {
+      const [found] = await GuestUser.findOrCreate({
+        where: { email },
+        defaults: { name, email },
+      });
+      guestUser = found;
+      if (guestUser.name !== name) {
+        await guestUser.update({ name });
+      }
+    } else {
+      guestUser = await GuestUser.create({ name });
     }
 
     const alreadyAdded = await activity.hasGuestUser(guestUser);
